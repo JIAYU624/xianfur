@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>冼夫人足迹地图 - 唯用一好心</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Noto Serif SC for classic feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;900&family=Zhi+Mang+Xing&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'ancient-paper': '#f6f4ee', // 提亮一点的米白，显得更干净
+                        'lingnan-cyan': '#235051',  // 更深邃的岭南青
+                        'antique-gold': '#c0923e',  // 更温润的古铜金
+                        'history-red': '#942f2f',   // 略带朱砂质感的历史红
+                        'dark-ink': '#262626',      // 墨黑
+                    },
+                    fontFamily: {
+                        'serif': ['"Noto Serif SC"', 'serif'],
+                        'calligraphy': ['"Zhi Mang Xing"', 'cursive'],
+                        'sans': ['Inter', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'ancient': '0 10px 30px -5px rgba(38, 38, 38, 0.2), 0 0 10px rgba(192, 146, 62, 0.1)',
+                        'marker': '0 4px 10px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.3)',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Noto Serif SC', serif; }
+        
+        #map { width: 100vw; height: 100vh; z-index: 10; background: #e6e0d4; }
+        
+        /* 优化古风滤镜：稍微调暖，降低对比度，更像陈年古卷 */
+        .leaflet-tile-pane {
+            filter: grayscale(0.4) sepia(0.55) contrast(1.05) brightness(0.95) hue-rotate(-5deg);
+        }
+
+        /* 全局暗角效果：让视觉中心聚焦于地图中央，增加历史厚重感 */
+        .vignette-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            box-shadow: inset 0 0 150px rgba(0,0,0,0.4);
+            z-index: 20;
+        }
+
+        /* 升级版 Marker：打造“玉石/印章”的立体质感 */
+        .custom-marker {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            border: 2px solid rgba(246, 244, 238, 0.9);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4), inset 0 2px 5px rgba(255,255,255,0.4);
+            background-image: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(0,0,0,0.1) 100%);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        .custom-marker:hover { transform: scale(1.25) translateY(-5px); z-index: 1000 !important; box-shadow: 0 8px 15px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.5); }
+        
+        .marker-history { background-color: #942f2f; }
+        .marker-relic { background-color: #c0923e; }
+        .marker-spirit { background-color: #235051; }
+
+        /* 优化脉冲动画：更柔和的光晕 */
+        .pulse::after {
+            content: "";
+            border-radius: 50%;
+            height: 100%; width: 100%;
+            position: absolute;
+            animation: pulsate 2.5s ease-out infinite;
+            opacity: 0.0;
+        }
+        .marker-history.pulse::after { box-shadow: 0 0 0 12px rgba(148, 47, 47, 0.6); }
+        .marker-relic.pulse::after { box-shadow: 0 0 0 12px rgba(192, 146, 62, 0.6); }
+
+        @keyframes pulsate {
+            0% { transform: scale(0.6); opacity: 0.8; }
+            100% { transform: scale(1.8); opacity: 0; }
+        }
+
+        /* 隐藏Leaflet默认控件，自定义zoom位置 */
+        .leaflet-control-attribution { display: none; }
+        .leaflet-control-zoom { 
+            border: 1px solid rgba(192, 146, 62, 0.3) !important; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15) !important; 
+            margin-top: 100px !important; 
+            margin-left: 20px !important;
+            border-radius: 8px !important;
+            overflow: hidden;
+        }
+        .leaflet-bar a { 
+            background-color: rgba(246, 244, 238, 0.9) !important; 
+            color: #235051 !important; 
+            backdrop-filter: blur(4px);
+        }
+        .leaflet-bar a:hover { background-color: #f6f4ee !important; }
+
+        /* 面板滑动动画 */
+        #detail-panel { transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+        .panel-closed { transform: translateY(100%); }
+        .panel-open { transform: translateY(0); }
+        @media (min-width: 768px) {
+            .panel-closed { transform: translateX(-100%); }
+            .panel-open { transform: translateX(0); }
+        }
+
+        /* 滚动条美化 */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(192, 146, 62, 0.3); border-radius: 10px; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 文字阴影增强书法感 */
+        .text-shadow-calligraphy { text-shadow: 2px 2px 4px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body class="text-dark-ink relative">
+
+    <!-- 地图容器与暗角遮罩 -->
+    <div id="map" class="absolute inset-0"></div>
+    <div class="vignette-overlay"></div>
+
+    <!-- 顶部标题栏 -->
+    <header class="absolute top-0 left-0 w-full z-40 pointer-events-none p-4 md:p-6 flex flex-col md:flex-row justify-between items-start gap-4">
+        <!-- 主标题 -->
+        <div class="pointer-events-auto bg-ancient-paper/80 backdrop-blur-md px-6 py-4 rounded-xl shadow-ancient border-t-2 border-b-2 border-antique-gold/50 flex flex-col items-center md:items-start relative overflow-hidden group">
+            <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMSI+PC9yZWN0Pgo8cGF0aCBkPSJNMCAwTDggOFpNOCAwTDAgOFoiIHN0cm9rZT0iI2MwOTIzZSIgc3Ryb2tlLW9wYWNpdHk9IjAuMDUiIHN0cm9rZS13aWR0aD0iMSI+PC9wYXRoPgo8L3N2Zz4=')] opacity-50"></div>
+            <h1 class="font-calligraphy text-4xl md:text-5xl text-lingnan-cyan mb-1 text-shadow-calligraphy relative z-10 tracking-wider">冼夫人足迹地图</h1>
+            <div class="flex items-center gap-3 relative z-10 mt-1">
+                <span class="w-8 h-[1px] bg-antique-gold/60"></span>
+                <p class="text-xs md:text-sm font-bold text-antique-gold tracking-[0.3em] uppercase">唯用一好心</p>
+                <span class="w-8 h-[1px] bg-antique-gold/60"></span>
+            </div>
+        </div>
+        
+        <!-- 图例/过滤面板 -->
+        <div class="pointer-events-auto bg-ancient-paper/85 backdrop-blur-md p-4 rounded-xl shadow-ancient border border-antique-gold/20 text-sm min-w-[140px]">
+            <h3 class="font-bold text-dark-ink border-b border-antique-gold/30 pb-2 mb-3 flex items-center gap-2">
+                <i class="fas fa-layer-group text-antique-gold"></i>图例筛选
+            </h3>
+            <label class="flex items-center space-x-3 cursor-pointer mb-3 group">
+                <input type="checkbox" id="filter-history" checked class="accent-history-red w-4 h-4 cursor-pointer" onchange="updateMap()">
+                <div class="w-3.5 h-3.5 rounded-full bg-history-red shadow-sm group-hover:scale-110 transition-transform"></div>
+                <span class="text-gray-700 group-hover:text-dark-ink font-medium">历史事件</span>
+            </label>
+            <label class="flex items-center space-x-3 cursor-pointer mb-3 group">
+                <input type="checkbox" id="filter-relic" checked class="accent-antique-gold w-4 h-4 cursor-pointer" onchange="updateMap()">
+                <div class="w-3.5 h-3.5 rounded-full bg-antique-gold shadow-sm group-hover:scale-110 transition-transform"></div>
+                <span class="text-gray-700 group-hover:text-dark-ink font-medium">文化遗存</span>
+            </label>
+            <label class="flex items-center space-x-3 cursor-pointer group">
+                <input type="checkbox" id="filter-spirit" checked class="accent-lingnan-cyan w-4 h-4 cursor-pointer" onchange="updateMap()">
+                <div class="w-3.5 h-3.5 rounded-full bg-lingnan-cyan shadow-sm group-hover:scale-110 transition-transform"></div>
+                <span class="text-gray-700 group-hover:text-dark-ink font-medium">精神传承</span>
+            </label>
+        </div>
+    </header>
+
+    <!-- 底部时间轴 (人生阶段) -->
+    <div class="absolute bottom-6 left-0 w-full z-40 flex justify-center pointer-events-none px-4">
+        <div class="pointer-events-auto bg-ancient-paper/90 backdrop-blur-lg px-4 py-4 md:px-8 md:py-5 rounded-2xl shadow-ancient border border-antique-gold/30 max-w-5xl w-full relative">
+            <!-- 贯穿时间轴的金线 -->
+            <div class="absolute top-[42%] left-10 right-10 h-[2px] bg-antique-gold/20 -z-10 hidden md:block"></div>
+            
+            <div class="overflow-x-auto hide-scrollbar">
+                <div class="flex justify-between items-start space-x-6 md:space-x-4 min-w-[600px] relative">
+                    
+                    <button class="timeline-btn active flex flex-col items-center group w-16" data-stage="all" onclick="selectStage('all')">
+                        <div class="w-12 h-12 rounded-full border-2 border-antique-gold bg-antique-gold text-white flex items-center justify-center transition-all duration-300 shadow-lg scale-110 z-10">
+                            <span class="font-serif text-lg font-bold text-shadow-calligraphy">全</span>
+                        </div>
+                        <span class="text-xs mt-2 font-bold text-antique-gold tracking-widest whitespace-nowrap">纵观一生</span>
+                    </button>
+                    
+                    <button class="timeline-btn flex flex-col items-center group w-20" data-stage="youth" onclick="selectStage('youth')">
+                        <div class="w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red">少</div>
+                        <span class="text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight">少年成长<br><span class="text-[10px] opacity-70">522-535</span></span>
+                    </button>
+                    
+                    <button class="timeline-btn flex flex-col items-center group w-20" data-stage="youth-gov" onclick="selectStage('youth-gov')">
+                        <div class="w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red">青</div>
+                        <span class="text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight">青年理政<br><span class="text-[10px] opacity-70">535-548</span></span>
+                    </button>
+                    
+                    <button class="timeline-btn flex flex-col items-center group w-20" data-stage="mature-war" onclick="selectStage('mature-war')">
+                        <div class="w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red">壮</div>
+                        <span class="text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight">壮年平乱<br><span class="text-[10px] opacity-70">548-589</span></span>
+                    </button>
+                    
+                    <button class="timeline-btn flex flex-col items-center group w-20" data-stage="mature-sui" onclick="selectStage('mature-sui')">
+                        <div class="w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red">归</div>
+                        <span class="text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight">归隋安民<br><span class="text-[10px] opacity-70">589-590</span></span>
+                    </button>
+
+                    <button class="timeline-btn flex flex-col items-center group w-20" data-stage="later" onclick="selectStage('later')">
+                        <div class="w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red">晚</div>
+                        <span class="text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight">晚年巡抚<br><span class="text-[10px] opacity-70">590-602</span></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情侧边栏/底部弹窗 -->
+    <div id="detail-panel" class="fixed bottom-0 md:top-0 left-0 w-full h-[80vh] md:w-[420px] md:h-screen bg-ancient-paper shadow-2xl z-50 flex flex-col rounded-t-[2.5rem] md:rounded-none hidden panel-closed border-t md:border-r border-antique-gold/30" 
+         style="background-image: url('data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z\' fill=\'%23c0923e\' fill-opacity=\'0.06\' fill-rule=\'evenodd\'/%3E');">
+        
+        <!-- 移动端顶部把手和关闭按钮 -->
+        <div class="pt-4 pb-2 px-6 flex justify-between items-center bg-ancient-paper/95 backdrop-blur-md sticky top-0 z-10 rounded-t-[2.5rem] md:rounded-none relative">
+            <div class="absolute left-1/2 -translate-x-1/2 top-2 w-12 h-1.5 bg-gray-300 rounded-full md:hidden"></div>
+            <div class="mt-4 md:mt-0 flex-1">
+                <span id="panel-badge" class="inline-block px-3 py-1 rounded-sm text-xs font-bold text-white bg-history-red mb-2 tracking-widest shadow-sm">历史事件</span>
+            </div>
+            <button onclick="closePanel()" class="w-10 h-10 mt-4 md:mt-0 rounded-full bg-gray-200/60 hover:bg-gray-300 flex items-center justify-center text-gray-600 transition-colors">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+
+        <!-- 面板内容滚动区 -->
+        <div class="flex-1 overflow-y-auto px-6 pb-24 md:pb-6 space-y-6 custom-scrollbar">
+            
+            <!-- 古典排版标题 -->
+            <div class="text-center relative py-4 border-y border-antique-gold/30">
+                <div class="absolute left-0 top-0 w-2 h-2 border-t border-l border-antique-gold"></div>
+                <div class="absolute right-0 top-0 w-2 h-2 border-t border-r border-antique-gold"></div>
+                <div class="absolute left-0 bottom-0 w-2 h-2 border-b border-l border-antique-gold"></div>
+                <div class="absolute right-0 bottom-0 w-2 h-2 border-b border-r border-antique-gold"></div>
+                
+                <h2 id="panel-title" class="text-2xl font-bold text-dark-ink font-serif leading-snug">点位名称</h2>
+            </div>
+            
+            <!-- 古今地名 -->
+            <div class="flex items-center justify-center space-x-3 text-sm text-lingnan-cyan bg-lingnan-cyan/5 py-2 px-4 rounded-md">
+                <i class="fas fa-compass opacity-70"></i>
+                <span><span class="opacity-60 text-xs">古</span> <span id="panel-ancient-name" class="font-bold"></span></span>
+                <span class="text-antique-gold opacity-50">/</span>
+                <span><span class="opacity-60 text-xs">今</span> <span id="panel-modern-name" class="font-bold"></span></span>
+            </div>
+
+            <!-- 图片占位图 (带边框装饰) -->
+            <div class="w-full h-56 rounded-sm overflow-hidden border-[6px] border-white shadow-md relative bg-[#e0d9c8]">
+                <img id="panel-img" src="" alt="实景图" class="w-full h-full object-cover transition-opacity duration-500 opacity-0" onload="this.classList.remove('opacity-0')">
+                <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-dark-ink/80 to-transparent pt-8 pb-2 px-3">
+                    <p class="text-white/90 text-xs text-right font-serif tracking-wider flex justify-end items-center gap-1">
+                        <i class="fas fa-camera-retro text-[10px]"></i> 史迹留存
+                    </p>
+                </div>
+            </div>
+
+            <!-- 历史详情段落 (首行缩进，字间距拉开，更有书卷气) -->
+            <div>
+                <h3 class="font-bold text-lg mb-3 flex items-center text-dark-ink border-l-4 border-history-red pl-3">
+                    历史考志
+                </h3>
+                <p id="panel-desc" class="text-gray-700 leading-relaxed text-justify indent-8 tracking-wide font-serif text-[15px]"></p>
+            </div>
+
+            <!-- 历史意义 -->
+            <div id="panel-significance-container" class="bg-[url('https://www.transparenttextures.com/patterns/rice-paper-2.png')] bg-[#f0ebd8] p-5 rounded-lg border border-antique-gold/20 shadow-inner">
+                <h3 class="font-bold text-md mb-2 text-antique-gold flex items-center gap-2">
+                    <i class="fas fa-landmark"></i>后世评价
+                </h3>
+                <p id="panel-significance" class="text-[14px] text-gray-800 leading-relaxed text-justify tracking-wide"></p>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const footprintData = [
+            // --- 第一阶段：少年成长 ---
+            {
+                id: 1, type: 'history', stage: 'youth', ancientName: '高凉郡电白', name: '广东茂名电白区', 
+                lat: 21.503, lng: 111.008, title: '降生俚族世家，少年聪慧',
+                desc: '冼夫人出生于百越俚族首领世家，自幼聪慧，多谋略。在娘家时即能抚慰部众，行军用兵，镇服周边越族部落，展现出非凡的领导才能。',
+                significance: '奠定了她在岭南俚人中崇高的威望基础，为其后纵横岭南大半个世纪拉开序幕。', icon: 'fa-seedling', isCore: true, order: 1
+            },
+            
+            // --- 第二阶段：青年理政 ---
+            {
+                id: 2, type: 'history', stage: 'youth-gov', ancientName: '高州/高凉', name: '广东阳江/茂名一带', 
+                lat: 21.860, lng: 111.975, title: '联姻冯宝，推行汉俚融合',
+                desc: '冼夫人与高凉太守冯宝联姻。婚后辅佐冯宝平息民事诉讼，首领犯罪也依法惩治，使得地方政令有序。推行先进的汉族农耕文化，教化越人。',
+                significance: '开启了岭南地区民族大融合、经济大发展的新篇章，稳定了古代高凉地区的政治与民生秩序。', icon: 'fa-hands-holding-circle', isCore: true, order: 2
+            },
+
+            // --- 第三阶段：壮年平乱 ---
+            {
+                id: 3, type: 'history', stage: 'mature-war', ancientName: '广州', name: '广东广州', 
+                lat: 23.129, lng: 113.264, title: '平定叛乱，解救广州',
+                desc: '梁朝爆发侯景之乱，高州刺史李迁仕图谋叛乱。冼夫人审时度势，识破其阴谋，派兵突袭击败李迁仕，随后与陈霸先会师，协助平定叛乱。',
+                significance: '保护了岭南免遭连年战火的摧残，展现了其卓越的军事谋略和坚定维护国家统一的政治觉悟。', icon: 'fa-khanda', isCore: true, order: 3
+            },
+            {
+                id: 4, type: 'history', stage: 'mature-war', ancientName: '高凉/合浦', name: '广东茂名至广西北海', 
+                lat: 21.650, lng: 109.118, title: '平欧阳纥，大义灭亲',
+                desc: '陈朝时，广州刺史欧阳纥叛乱，召冼夫人之子冯仆为人质。冼夫人不因私情害公义，毅然发兵拒境，配合陈军平叛。因此功绩被册封为中郎将、石龙太夫人。',
+                significance: '坚持“唯用一好心”，不随波逐流，不顾私情，再次维护了岭南的安定与南朝版图的统一。', icon: 'fa-shield-halved', isCore: false, order: 4
+            },
+
+            // --- 第四阶段：归隋安民 ---
+            {
+                id: 5, type: 'history', stage: 'mature-sui', ancientName: '番禺', name: '广东广州南沙', 
+                lat: 22.850, lng: 113.550, title: '奉诏归隋，天下一统',
+                desc: '陈朝灭亡后，岭南数郡共奉冼夫人为主，号“圣母”。隋文帝派使者展示陈后主信物，冼夫人见物痛哭，随后降下陈旗，率领岭南百越归顺隋朝。',
+                significance: '让岭南兵不血刃并入大隋版图，避免了生灵涂炭，直接促成了中国历史上南北朝之后的大一统。', icon: 'fa-scroll', isCore: true, order: 5
+            },
+
+            // --- 第五阶段：晚年巡抚 ---
+            {
+                id: 6, type: 'history', stage: 'later', ancientName: '崖州/儋耳', name: '海南儋州等全境', 
+                lat: 19.522, lng: 109.580, title: '请置崖州，安抚海南',
+                desc: '冼夫人上书朝廷在海南岛重新设置崖州，恢复了中原王朝对海南岛的直接管辖。晚年她亲自巡视海南各部落，惩治贪官，教化民众，推广中原先进技术。',
+                significance: '确立了中央政权对海南的实质性管辖，促进了海南岛的开发与文明开化，功在千秋。', icon: 'fa-ship', isCore: true, order: 6
+            },
+
+            // --- 文化遗存 (贯穿全图) ---
+            {
+                id: 7, type: 'relic', stage: 'all', ancientName: '高凉郡遗址', name: '茂名高州市区', 
+                lat: 21.930, lng: 110.850, title: '高州冼太庙',
+                desc: '岭南地区规模最大、等级最高的冼太庙之一。始建于明代，保留了丰富的木雕、石雕及壁画艺术，是历代官方与民间祭祀冼夫人的核心场所。',
+                significance: '全国重点文物保护单位，传承冼夫人信仰的核心建筑载体与历史见证。', icon: 'fa-vihara', isCore: true
+            },
+            {
+                id: 8, type: 'relic', stage: 'all', ancientName: '丁村古村', name: '茂名电白区', 
+                lat: 21.550, lng: 111.050, title: '冼太夫人故里文化旅游区',
+                desc: '包含隋谯国夫人冼氏墓（全国重点文物保护单位）、冼太庙等古迹，出土了大量隋唐时期的珍贵文物，如具有波斯风格的铜器等，印证了当时海上丝绸之路的繁荣。',
+                significance: '历史学与考古学研究的实物宝库，也是现代文旅打卡、寻根问祖的核心景区。', icon: 'fa-archway', isCore: true
+            },
+            {
+                id: 9, type: 'relic', stage: 'all', ancientName: '崖州', name: '海口市琼山区', 
+                lat: 19.980, lng: 110.350, title: '海南冼夫人纪念馆',
+                desc: '专门展示了冼夫人收复、治理海南的历史功绩，馆内保存有历代缅怀冼夫人的碑刻和祭祀用品。',
+                significance: '海南人民世世代代感念与祭拜“圣母”的重要精神场所。', icon: 'fa-monument', isCore: false
+            },
+
+            // --- 精神传承 (现代/海外) ---
+            {
+                id: 10, type: 'spirit', stage: 'all', ancientName: '-', name: '茂名/海南各地', 
+                lat: 21.600, lng: 110.900, title: '冼夫人信俗（非遗）',
+                desc: '每年农历十一月廿四冼夫人诞辰及春节期间，各地举行盛大的祭祀、巡游（如茂名“年例”）、游神活动，包含舞狮、木偶戏、抢花炮等丰富的民间艺术。',
+                significance: '作为国家级非物质文化遗产，活态传承了“好心精神”，极大地增强了海内外华人的文化认同感与凝聚力。', icon: 'fa-fire-flame-curved', isCore: true
+            },
+            {
+                id: 11, type: 'spirit', stage: 'all', ancientName: '海上丝绸之路', name: '东南亚及海外', 
+                lat: 18.000, lng: 112.000, title: '好心文化出海',
+                desc: '随着下南洋的华侨脚步，冼太庙被建到了马来西亚、新加坡、越南等地。冼夫人从一位历史人物，逐渐化身为海上丝绸之路上的重要民间保护神。',
+                significance: '成为岭南文化对外传播的桥梁，紧密连接海外侨胞的精神纽带。', icon: 'fa-earth-asia', isCore: false
+            }
+        ];
+
+        let map;
+        let markersGroup;
+        let currentPolyline = null;
+        let currentStageState = 'all';
+
+        function initMap() {
+            // 设定初始中心点在岭南区域
+            map = L.map('map', {
+                center: [21.0, 111.5],
+                zoom: 7,
+                zoomControl: false,
+                maxBounds: [[15.0, 104.0], [26.0, 118.0]], // 限制拖动范围在华南
+                maxBoundsViscosity: 0.8
+            });
+
+            L.control.zoom({ position: 'topleft' }).addTo(map);
+
+            // 使用高德底图，配合CSS达到古风效果
+            L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+                subdomains: ['1', '2', '3', '4'],
+                attribution: '&copy; 高德地图',
+                maxZoom: 11,
+                minZoom: 6
+            }).addTo(map);
+
+            markersGroup = L.layerGroup().addTo(map);
+
+            setTimeout(() => {
+                map.invalidateSize();
+                updateMap();
+            }, 100);
+        }
+
+        function updateMap() {
+            markersGroup.clearLayers();
+            if (currentPolyline) {
+                map.removeLayer(currentPolyline);
+            }
+
+            const showHistory = document.getElementById('filter-history').checked;
+            const showRelic = document.getElementById('filter-relic').checked;
+            const showSpirit = document.getElementById('filter-spirit').checked;
+
+            footprintData.forEach(point => {
+                if (point.type === 'history' && !showHistory) return;
+                if (point.type === 'relic' && !showRelic) return;
+                if (point.type === 'spirit' && !showSpirit) return;
+
+                if (currentStageState !== 'all' && point.type === 'history') {
+                    if (point.stage !== currentStageState) return;
+                }
+
+                let markerClass = '';
+                let size = point.isCore ? [44, 44] : [32, 32];
+                let iconSize = point.isCore ? 'text-xl' : 'text-sm';
+                
+                if (point.type === 'history') markerClass = 'marker-history text-white';
+                if (point.type === 'relic') markerClass = 'marker-relic text-white';
+                if (point.type === 'spirit') markerClass = 'marker-spirit text-white';
+
+                if (point.isCore) markerClass += ' pulse';
+
+                const customIcon = L.divIcon({
+                    className: `custom-marker ${markerClass}`,
+                    html: `<i class="fas ${point.icon} ${iconSize}"></i>`,
+                    iconSize: size,
+                    iconAnchor: [size[0]/2, size[1]/2]
+                });
+
+                const marker = L.marker([point.lat, point.lng], { icon: customIcon }).addTo(markersGroup);
+                
+                marker.on('click', () => {
+                    openDetailPanel(point);
+                    
+                    // 像素级平移避免眩晕
+                    const targetZoom = map.getZoom() < 8 ? 8 : map.getZoom(); 
+                    const targetPoint = map.project([point.lat, point.lng], targetZoom);
+                    
+                    if (window.innerWidth >= 768) {
+                        targetPoint.x -= 210; // 适配新版420px宽度的面板
+                    } else {
+                        targetPoint.y += window.innerHeight * 0.4; 
+                    }
+                    
+                    const targetLatLng = map.unproject(targetPoint, targetZoom);
+
+                    if (map.getSize().x > 0) {
+                        if (map.getZoom() === targetZoom) {
+                            map.panTo(targetLatLng, { animate: true, duration: 0.6, easeLinearity: 0.25 });
+                        } else {
+                            map.flyTo(targetLatLng, targetZoom, { duration: 0.6, easeLinearity: 0.25 });
+                        }
+                    } else {
+                        map.setView(targetLatLng, targetZoom);
+                    }
+                });
+            });
+
+            // 绘制轨迹线
+            if (showHistory) {
+                const allTracePoints = footprintData
+                    .filter(p => p.type === 'history' && p.order)
+                    .sort((a, b) => a.order - b.order);
+
+                if (currentStageState === 'all') {
+                    const latlngs = allTracePoints.map(p => [p.lat, p.lng]);
+                    currentPolyline = L.polyline(latlngs, {
+                        color: '#c0923e', 
+                        weight: 2,
+                        opacity: 0.4,
+                        dashArray: '4, 8',
+                        lineJoin: 'round'
+                    }).addTo(map);
+                    
+                    if (map.getSize().x > 0 && map.getSize().y > 0) {
+                        map.flyTo([21.0, 111.5], 7, { duration: 1.0 });
+                    }
+                } else {
+                    let stagePoints = allTracePoints.filter(p => p.stage === currentStageState);
+                    
+                    if (stagePoints.length > 0) {
+                        let linePoints = [];
+                        let firstPointIndex = allTracePoints.findIndex(p => p.id === stagePoints[0].id);
+                        
+                        if (firstPointIndex > 0) {
+                            linePoints.push(allTracePoints[firstPointIndex - 1]);
+                        }
+                        linePoints.push(...stagePoints);
+
+                        if (linePoints.length > 1) {
+                            const latlngs = linePoints.map(p => [p.lat, p.lng]);
+                            currentPolyline = L.polyline(latlngs, {
+                                color: '#942f2f',
+                                weight: 4,
+                                opacity: 0.85,
+                                dashArray: '8, 12',
+                                lineJoin: 'round'
+                            }).addTo(map);
+                        }
+                        
+                        const boundsPoints = stagePoints.map(p => [p.lat, p.lng]);
+                        const bounds = L.latLngBounds(boundsPoints);
+                        
+                        if (map.getSize().x > 0 && map.getSize().y > 0) {
+                            // padding增加，适应暗角和UI遮挡
+                            map.fitBounds(bounds, { padding: [100, 100], maxZoom: 9, animate: true, duration: 0.8 });
+                        }
+                    }
+                }
+            }
+        }
+
+        function selectStage(stage) {
+            currentStageState = stage;
+            
+            document.querySelectorAll('.timeline-btn').forEach(btn => {
+                const iconDiv = btn.querySelector('div');
+                const textSpan = btn.querySelectorAll('span')[0]; // 取第一个span (外层)
+                
+                if (btn.dataset.stage === stage) {
+                    // Active state
+                    if(stage === 'all'){
+                        iconDiv.className = 'w-12 h-12 rounded-full border-2 border-antique-gold bg-antique-gold text-white flex items-center justify-center transition-all duration-300 shadow-lg scale-110 z-10';
+                        textSpan.className = 'text-xs mt-2 font-bold text-antique-gold tracking-widest whitespace-nowrap';
+                    } else {
+                        iconDiv.className = 'w-12 h-12 rounded-full border-2 border-history-red bg-history-red text-white flex items-center justify-center transition-all duration-300 shadow-lg scale-110 z-10';
+                        textSpan.className = 'text-xs mt-2 font-bold text-history-red tracking-widest whitespace-nowrap text-center leading-tight';
+                    }
+                } else {
+                    // Inactive state
+                    iconDiv.className = 'w-10 h-10 rounded-full border-2 border-gray-300 group-hover:border-history-red bg-ancient-paper flex items-center justify-center transition-all duration-300 z-10 text-gray-500 group-hover:text-history-red';
+                    if(btn.dataset.stage === 'all'){
+                        textSpan.className = 'text-xs mt-2 font-bold text-gray-500 tracking-widest whitespace-nowrap';
+                    } else {
+                        textSpan.className = 'text-xs mt-2 text-gray-500 group-hover:text-history-red font-medium text-center leading-tight';
+                    }
+                }
+            });
+
+            document.getElementById('filter-history').checked = true;
+            updateMap();
+            closePanel();
+        }
+
+        function openDetailPanel(pointData) {
+            const panel = document.getElementById('detail-panel');
+            
+            document.getElementById('panel-title').innerText = pointData.title;
+            document.getElementById('panel-ancient-name').innerText = pointData.ancientName;
+            document.getElementById('panel-modern-name').innerText = pointData.name;
+            document.getElementById('panel-desc').innerText = pointData.desc;
+            document.getElementById('panel-significance').innerText = pointData.significance;
+
+            const badge = document.getElementById('panel-badge');
+            let typeName, typeColor;
+            if (pointData.type === 'history') { typeName = '历史事件'; typeColor = 'bg-history-red'; }
+            else if (pointData.type === 'relic') { typeName = '文化遗存'; typeColor = 'bg-antique-gold'; }
+            else { typeName = '精神传承'; typeColor = 'bg-lingnan-cyan'; }
+            
+            badge.innerText = typeName;
+            badge.className = `inline-block px-4 py-1 rounded-sm text-xs font-bold text-white ${typeColor} mb-2 tracking-widest shadow-sm`;
+
+            const imgEl = document.getElementById('panel-img');
+            imgEl.classList.add('opacity-0'); 
+            const imgColor = pointData.type === 'history' ? '942f2f' : (pointData.type === 'relic' ? 'c0923e' : '235051');
+            const imgText = encodeURIComponent(pointData.title);
+            imgEl.src = `https://placehold.co/800x600/${imgColor}/F6F4EE?text=${imgText}&font=serif`;
+
+            panel.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    panel.classList.remove('panel-closed');
+                    panel.classList.add('panel-open');
+                });
+            });
+        }
+
+        function closePanel() {
+            const panel = document.getElementById('detail-panel');
+            if(panel.classList.contains('hidden')) return;
+
+            panel.classList.remove('panel-open');
+            panel.classList.add('panel-closed');
+
+            setTimeout(() => {
+                panel.classList.add('hidden');
+            }, 600); 
+        }
+
+        window.onload = function() {
+            initMap();
+        };
+    </script>
+</body>
+</html>
